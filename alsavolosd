@@ -1,0 +1,157 @@
+#!/bin/bash
+
+# alsavolosd: A simple script to adjust the volume of your soundcard
+#
+# This tool will adjust the volume of your soundcard, while displaying
+# a nice OSD (On-Screen Display) bar with the adjusted volume level.
+#
+# Author: Dimitris Lampridis <dlampridis_at_gmail.com>
+
+# (C) Copyright 2010 Dimitris Lampridis
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#-------------------------------------------------------------------------
+# configuration settings below, adjust as necessary
+
+####################
+#  AUDIO SETTINGS  #
+####################
+ 
+# Change this to match the channel of your soundcard
+# To find out the available channel names, you can run
+# this script with the "list" argument
+CHANNEL="Analog Front"
+
+# Volume change step in dB (default = 2dB)
+STEP="2"
+
+####################
+#   OSD SETTINGS   #
+####################
+
+# Font name and size (default = FreeSerif, size 64)
+# Try reducing the size of the OSD is too large for your
+# desktop resolution
+FONT="FreeSerif"
+FONTSIZE="64"
+
+# Colors to use for OSD in normal mode (ONCOLOR), as
+# well as when muted (OFFCOLOR)
+ONCOLOR="green"
+OFFCOLOR="red"
+
+# Character to use for OSD display (default = "|")
+OSDCHAR="|"
+
+# Horizontal scaling factor
+# Try reducing this if the OSD is so long that it continues
+# on a second line (default = 2)
+HORIZSCALE="2"
+
+# OSD position, X and Y (default x=10, y=-10)
+OSDX="10"
+OSDY="-10"
+
+# OSD Fade in/out, in milliseconds (default = 0ms)
+FADEIN="0"
+FADEOUT="0"
+
+#####################
+# PROGRAM LOCATIONS #
+#####################
+
+# Adjust the location of required binaries (if needed)
+# Should be OK for most Linux distributions
+AMIXER=/usr/bin/amixer
+AOSD=/usr/bin/aosd_cat
+AWK=/usr/bin/awk
+GREP=/bin/grep
+ECHO=/bin/echo
+KILLALL=/usr/bin/killall
+TR=/usr/bin/tr
+
+# end of configuration settings, nothing requires changing below this line
+#-------------------------------------------------------------------------
+
+
+# check that all binaries exist
+for i in $AMIXER $AOSD $AWK $GREP $ECHO $KILLALL $TR
+do
+    if [ ! -e $i ]; then
+	$ECHO $i" does not exist"
+	$ECHO "please install it if missing, and/or adjust the configuration settings to point to the correct location"
+	exit
+    fi
+done
+
+# check 1st argument and, if necessary, modify the soundcard volume
+case $1 in
+    up) 
+	$AMIXER -q sset "$CHANNEL" "$STEP"dB+
+	;;
+
+    down) 
+	$AMIXER -q sset "$CHANNEL" "$STEP"dB-
+	;;
+
+    mute) 
+	$AMIXER -q set "$CHANNEL" toggle 
+	;;
+
+    list) 
+	$AMIXER -q | $GREP "Simple mixer control" | $AWK -F "'" '{print $2}'
+	exit
+	;;
+
+    *) 
+	$ECHO "Usage:"
+	$ECHO "      $(basename $0) { up | down | mute | list }" 
+	exit
+	;;
+esac
+
+# check number of channels (mono, stereo)
+NCHANNELS=$($AMIXER get "$CHANNEL" | $GREP "Playback channels:" | $AWK '{print $NF}')
+
+# get mute status and current volume
+if [ $NCHANNELS == "Mono" ]; then
+    MUTESTATUS=$($AMIXER get "$CHANNEL" | $GREP "Mono: Playback" | $AWK '{print $6}' | $TR -d '[]')
+    CURRENTVOL=$($AMIXER get "$CHANNEL" | $GREP "Mono: Playback" | $AWK '{print $4}' | $TR -d '[%]')
+else
+    MUTESTATUS=$($AMIXER get "$CHANNEL" | $GREP "Front Left: Playback" | $AWK '{print $7}' | $TR -d '[]')
+    CURRENTVOL=$($AMIXER get "$CHANNEL" | $GREP "Front Left: Playback" | $AWK '{print $5}' | $TR -d '[%]')
+fi
+
+# determine number of characters to draw on the OSD
+VOLSTEPS=$(expr $CURRENTVOL / $HORIZSCALE)
+
+# select OSD color based on mute status
+if [ $MUTESTATUS == "off" ]; then
+   OSDCOLOR=$OFFCOLOR
+else
+   OSDCOLOR=$ONCOLOR
+fi
+
+# "draw" the OSD characters on a temporary string
+for i in $(seq 1 $VOLSTEPS)
+do
+    OSDI=$OSDCHAR$OSDI
+done
+
+# kill any existing instances of AOSD_CAT
+$KILLALL aosd_cat &> /dev/null
+
+# Print the temporary string on screen with AOSD_CAT   
+$ECHO "$OSDI" | $AOSD -n "$FONT $FONTSIZE" -R $OSDCOLOR -o $FADEOUT -f $FADEIN -x $OSDX -y $OSDY
